@@ -4,7 +4,8 @@ import torch.nn.functional as F
 import numpy as np
 
 import dgl
-from dgl.graph import DGLGraph
+# from dgl.graph import DGLGraph
+from dgl import DGLGraph
 from dgl.utils import Index
 
 import pickle
@@ -78,7 +79,7 @@ class equi_2_to_2(nn.Module):
         for i in range(self.radius):
             for j in range(i+1):
                 output_i = th.einsum('dsb,ndbij->nsij', self.coeffs_list[i*(i+1)//2 + j], ops_out)
-                mat_diag_bias = th.eye(inputs.size()[3]).to('cuda:0').unsqueeze(0).unsqueeze(0) * self.diag_bias_list[i*(i+1)//2 + j]
+                mat_diag_bias = th.eye(inputs.size()[3]).to(inputs.device).unsqueeze(0).unsqueeze(0) * self.diag_bias_list[i*(i+1)//2 + j]
                 if j == 0:
                     output = output_i + mat_diag_bias
                 else:

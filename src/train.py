@@ -175,8 +175,8 @@ def main():
     parser.add_argument('--degree_as_nlabels', action="store_true")
     args = parser.parse_args()
 
-    dev0 = th.device('cpu')
-    dev = th.device('cpu') if args.gpu < 0 else th.device('cuda:%d' % args.gpu)
+    dev = th.device('cpu')
+    # dev = th.device('cpu') if args.gpu < 0 else th.device('cuda:%d' % args.gpu)
 
     feats = [args.n_input] + [args.n_hidden] * (args.n_layers-1) + [args.n_classes]
     model = Ring_GNN(args.nodeclasses, args.n_classes, avgnodenum = args.avgnodenum, hidden = 32, radius = args.radius).to(dev)
@@ -186,8 +186,8 @@ def main():
 
     th.manual_seed(0)
     np.random.seed(0) 
-    if th.cuda.is_available():
-        th.cuda.manual_seed_all(0)
+    # if th.cuda.is_available():
+    #     th.cuda.manual_seed_all(0)
 
     dataset = GINDataset(args.dataset, self_loop = False, device = dev, degree_as_nlabel=args.degree_as_nlabels)
 

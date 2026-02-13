@@ -8,7 +8,8 @@ import os
 import numpy as np
 
 from utils import download, extract_archive, get_download_dir, _get_dgl_url
-from dgl.graph import DGLGraph
+# from dgl.graph import DGLGraph
+from dgl import DGLGraph
 from dgl.utils import Index
 import torch as th
 
@@ -221,11 +222,13 @@ class GINDataset(object):
                 else:
                     nattrs = None
 
-                g.ndata['label'] = np.array(nlabels)
+                # g.ndata['label'] = np.array(nlabels)
+                g.ndata['label'] = th.tensor(np.array(nlabels))
                 if len(self.nlabel_dict) > 1:
                     self.nlabels_flag = True
 
-                assert len(g) == n_nodes
+                # assert len(g) == n_nodes
+                assert g.num_nodes() == n_nodes
 
                 # update statistics of graphs
                 self.n += n_nodes
@@ -263,7 +266,7 @@ class GINDataset(object):
                 label2idx = self.nlabel_dict
 
             for g in self.graphs:
-                g.ndata['attr'] = np.zeros((
+                g.ndata['attr'] = th.zeros((
                     g.number_of_nodes(), len(label2idx)))
                 g.ndata['attr'][range(g.number_of_nodes(
                 )), [label2idx[nl.item()] for nl in g.ndata['label']]] = 1
@@ -331,6 +334,6 @@ class GINDataset(object):
         for i, g in enumerate(self.graphs):
             new_adj = th.stack([self._adj[i] for j in range(self.nclasses + 1)])
             for j, nl in enumerate(g.ndata['label']):
-                new_adj[self.nlabel_dict[nl]+1][j][j] = 1
+                new_adj[self.nlabel_dict[nl.item()]+1][j][j] = 1
             
             self._adj[i] = new_adj

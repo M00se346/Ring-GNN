@@ -5,7 +5,6 @@ python train.py \
 --output-folder results \
 --dataset MUTAG \
 --n-classes 2 \
---gpu 0 \
 --batch-size 128 \
 --test-batch-size 1 \
 --fold-idx 0 \
