@@ -105,3 +105,20 @@ venv.bak/
 
 # mypy
 .mypy_cache/
+
+# --- MemryX & Parrot Specifics ---
+# Ignore the MemryX SDK/Toolkit folder you dragged in
+mx/
+bin/
+*.dfp
+*.accel
+*.logs
+
+# Ignore the data we are capturing for the NPU
+parrot_data/
+observation_*.pt
+sample_*.pt
+
+# Ignore your baseline results
+results/
+baseline_*.csv

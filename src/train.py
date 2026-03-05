@@ -145,9 +145,6 @@ def test(args, model, device, train_graphs, test_graphs, epoch):
 
     print("accuracy train: %f test: %f" % (acc_train, acc_test))
 
-    # test_acc_list.append(acc_test)
-    # results_table.append(acc_test)
-    # results_table.append([i, acc_test, epoch_duration])
     return acc_train, acc_test
 
 
@@ -197,26 +194,6 @@ def main():
     dataset = GINDataset(args.dataset, self_loop = False, device = dev, degree_as_nlabel=args.degree_as_nlabels)
 
     train_graphs, test_graphs = separate_data(dataset, args.seed, args.fold_idx)
-
-    # for i in range(args.n_epochs):
-    #     scheduler.step()
-    #     train(args, model, dev, train_graphs, optimizer, i)
-    #     test(args, model, dev, train_graphs, test_graphs, i)
-    
-    # for i in range(args.n_epochs):
-    #     start_time = time.time()  # <--- Start the clock
-        
-    #     scheduler.step()
-    #     train(args, model, dev, train_graphs, optimizer, i)
-    #     acc_train, acc_test = test(args, model, dev, train_graphs, test_graphs, i)
-        
-    #     epoch_duration = time.time() - start_time  # <--- Calculate duration
-        
-    #     # Add the data row for this epoch
-    #     results_table.append([i, acc_test, epoch_duration])
-        
-    #     print(f"Epoch {i} completed in {epoch_duration:.2f} seconds")
-
     results_table = [] # Initialize at the start of main()
 
     for i in range(args.n_epochs):
