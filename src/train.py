@@ -23,7 +23,8 @@ import sys
 
 from utils import output_csv
 
-test_acc_list = []
+# test_acc_list = []
+results_table = []
 
 class Unbuffered(object):
    def __init__(self, stream):
@@ -144,9 +145,13 @@ def test(args, model, device, train_graphs, test_graphs, epoch):
 
     print("accuracy train: %f test: %f" % (acc_train, acc_test))
 
-    test_acc_list.append(acc_test)
-
+    # test_acc_list.append(acc_test)
+    # results_table.append(acc_test)
+    # results_table.append([i, acc_test, epoch_duration])
     return acc_train, acc_test
+
+
+    # return acc_train, acc_test
 
 def main():
 
@@ -193,12 +198,44 @@ def main():
 
     train_graphs, test_graphs = separate_data(dataset, args.seed, args.fold_idx)
 
+    # for i in range(args.n_epochs):
+    #     scheduler.step()
+    #     train(args, model, dev, train_graphs, optimizer, i)
+    #     test(args, model, dev, train_graphs, test_graphs, i)
+    
+    # for i in range(args.n_epochs):
+    #     start_time = time.time()  # <--- Start the clock
+        
+    #     scheduler.step()
+    #     train(args, model, dev, train_graphs, optimizer, i)
+    #     acc_train, acc_test = test(args, model, dev, train_graphs, test_graphs, i)
+        
+    #     epoch_duration = time.time() - start_time  # <--- Calculate duration
+        
+    #     # Add the data row for this epoch
+    #     results_table.append([i, acc_test, epoch_duration])
+        
+    #     print(f"Epoch {i} completed in {epoch_duration:.2f} seconds")
+
+    results_table = [] # Initialize at the start of main()
+
     for i in range(args.n_epochs):
+        start_time = time.time() # Start clock
+        
         scheduler.step()
         train(args, model, dev, train_graphs, optimizer, i)
-        test(args, model, dev, train_graphs, test_graphs, i)
-    
-    output_csv(args.output_folder + '/0729_' + args.output_file + '_' + str(args.fold_idx) + '.csv', test_acc_list)
+        
+        # Capture the return values from test()
+        acc_train, acc_test = test(args, model, dev, train_graphs, test_graphs, i)
+        
+        duration = time.time() - start_time # End clock
+        
+        # Build the row here where 'i' and 'duration' are valid
+        results_table.append([i, acc_test, duration])
+        
+        print(f"Epoch {i} finished in {duration:.2f}s")
+
+    output_csv(args.output_folder + '/0729_' + args.output_file + '_' + str(args.fold_idx) + '.csv', results_table)
 
 if __name__ == '__main__':
     main()

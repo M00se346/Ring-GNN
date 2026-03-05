@@ -169,12 +169,13 @@ def get_download_dir():
         os.makedirs(dirname)
     return dirname
 
-def output_csv(file_name, test_acc_list):
-    with open(file_name, mode='w') as output_file:
+def output_csv(file_name, results_table):
+    with open(file_name, mode='w', newline='') as output_file:
         output_writer = csv.writer(output_file, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
-
-        for acc in test_acc_list:
-            output_writer.writerow([acc])
+        output_writer.writerow(['Epoch', 'Accuracy', 'Time (s)'])
+        output_writer.writerows(results_table)
+        # for row in results_table:
+        #     output_writer.writerow(row)
 
 def average_csv(dir, prefix):
     file_list = os.listdir(dir)
