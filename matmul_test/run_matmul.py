@@ -2,7 +2,7 @@ import numpy as np
 import time
 from memryx import SyncAccl
 
-model_path = 'matmul.dfp'
+model_path = 'matmul_large.dfp'
 
 try:
     print(f"--- Opening 4-Chip MPU (Sync Mode) ---")
@@ -10,7 +10,7 @@ try:
     accl = SyncAccl(model_path)
     
     # 2. Create the input [1, 16]
-    data = np.random.rand(1, 16).astype(np.float32)
+    data = np.random.rand(1, 1024).astype(np.float32)
     
     print("🚀 Sending matrix and waiting for result...")
     
