@@ -307,7 +307,9 @@ class GINDataset(object):
     def _preprocess(self):
         self._deg = [self.in_degrees(g).to(self.device) for g in self.graphs]
         self._edges = [(g.all_edges()[0].to(self.device), g.all_edges()[1].to(self.device)) for g in self.graphs]
-        self._adj = [g.adjacency_matrix().to_dense().to(self.device) for g in self.graphs]
+        # self._adj = [g.adjacency_matrix().to_dense().to(self.device) for g in self.graphs]
+        # new line for float for NPU:
+        self._adj = [g.adjacency_matrix().to_dense().to(self.device).float() for g in self.graphs]
         self._adj = [self._sym_normalize_adj(adj) for adj in self._adj]
 
         if self.line_graph:
@@ -316,11 +318,34 @@ class GINDataset(object):
             self._lgs_edges = [(lg.all_edges()[0].to(self.device), lg.all_edges()[1].to(self.device)) for lg in self._lgs]
             self._pm, self._pd = self._pm_pd(self.graphs)
     
+    # def _sym_normalize_adj(self, adj):
+    #     deg = th.sum(adj, dim = 0).squeeze()
+    #     deg_inv = th.where(deg>0, 1./th.sqrt(deg), th.zeros(deg.size()).to(self.device))
+    #     deg_inv = th.diag(deg_inv)
+    #     return th.mm(deg_inv, th.mm(adj, deg_inv))
+    
     def _sym_normalize_adj(self, adj):
-        deg = th.sum(adj, dim = 0).squeeze()
-        deg_inv = th.where(deg>0, 1./th.sqrt(deg), th.zeros(deg.size()).to(self.device))
-        deg_inv = th.diag(deg_inv)
-        return th.mm(deg_inv, th.mm(adj, deg_inv))
+        # If adj is 2xN, it's actually an EDGE LIST, not a matrix!
+        if adj.shape[0] == 2 and adj.shape[1] != 2:
+            N = adj.max().item() + 1 # Find the number of nodes
+            N = int(max(N, 146))     # Safety check for IMDB size
+
+            # Create a real NxN identity-like or empty matrix
+            real_adj = th.zeros((N, N), device=adj.device)
+
+            # Fill the matrix: adj[0] are sources, adj[1] are destinations
+            # We place 1s where edges exist
+            real_adj[adj[0].long(), adj[1].long()] = 1.0
+            adj = real_adj
+
+        # Now run the standard math on our reconstructed NxN matrix
+        adj = adj.float()
+        deg = th.sum(adj, dim=1).flatten()
+        deg_inv = th.where(deg > 0, 1./th.sqrt(deg), th.zeros_like(deg))
+        deg_inv[th.isinf(deg_inv)] = 0.0
+
+        # Normalization
+        return adj * deg_inv.view(1, -1) * deg_inv.view(-1, 1)
 
     def _deg_as_feature(self):
         for i, g in enumerate(self.graphs):

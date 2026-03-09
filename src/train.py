@@ -1,4 +1,42 @@
-from __future__ import division
+from __future__ import division 
+import os
+
+from types import ModuleType
+import sys
+
+# 1. GHOST MODULE FOR GRAPHBOLT
+gb_mock = ModuleType('dgl.graphbolt')
+gb_mock.load_graphbolt = lambda: None 
+sys.modules['dgl.graphbolt'] = gb_mock
+
+# 2. GHOST MODULE FOR DGL SPARSE (The Chameleon Version)
+sparse_mock = ModuleType('dgl.sparse')
+sparse_mock.load_dgl_sparse = lambda: None
+
+class DummySparse:
+    def __init__(self, *args, **kwargs):
+        # Store the first argument, which is likely the internal sparse matrix format
+        self.data = args[0] if args else None
+        
+    def to_dense(self):
+        # This is the critical hand-off. When gindt.py calls .to_dense(),
+        # we return the underlying data directly.
+        return self.data
+
+sparse_mock.spmatrix = DummySparse
+sys.modules['dgl.sparse'] = sparse_mock
+
+# 3. ENVIRONMENT BYPASSES
+os.environ['DGL_DISABLE_GRAPHBOLT'] = '1'
+os.environ['DGLBACKEND'] = 'pytorch'
+
+# 4. TORCHDATA MOCK
+td_mock = ModuleType('torchdata')
+sys.modules['torchdata'] = td_mock
+sys.modules['torchdata.datapipes'] = ModuleType('torchdata.datapipes')
+sys.modules['torchdata.datapipes.iter'] = ModuleType('torchdata.datapipes.iter')
+
+
 import time
 from datetime import datetime as dt
 
@@ -181,7 +219,18 @@ def main():
     # dev = th.device('cpu') if args.gpu < 0 else th.device('cuda:%d' % args.gpu)
 
     feats = [args.n_input] + [args.n_hidden] * (args.n_layers-1) + [args.n_classes]
-    model = Ring_GNN(args.nodeclasses, args.n_classes, avgnodenum = args.avgnodenum, hidden = 32, radius = args.radius).to(dev)
+    
+    #Original model call for CPU:
+    # model = Ring_GNN(args.nodeclasses, args.n_classes, avgnodenum = args.avgnodenum, hidden = 32, radius = args.radius).to(dev)
+    #new call:
+    model = Ring_GNN(
+        args.nodeclasses, 
+        args.n_classes, 
+        avgnodenum = 32,    # FORCE this to 32 to match your DFP
+        hidden = 32, 
+        radius = args.radius,
+        use_npu = True      # Trigger the NPU code in model.py
+    ).to(dev)
 
     optimizer = getattr(optim, args.optim)(model.parameters(), lr=args.lr)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=20, gamma=0.5)
@@ -212,7 +261,7 @@ def main():
         
         print(f"Epoch {i} finished in {duration:.2f}s")
 
-    output_csv(args.output_folder + '/0729_' + args.output_file + '_' + str(args.fold_idx) + '.csv', results_table)
+    output_csv(args.output_folder + '/0730_NPU_accl_' + args.output_file + '_' + str(args.fold_idx) + '.csv', results_table)
 
 if __name__ == '__main__':
     main()
