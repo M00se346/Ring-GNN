@@ -212,7 +212,7 @@ def main():
         
         print(f"Epoch {i} finished in {duration:.2f}s")
 
-    output_csv(args.output_folder + '/0729_' + args.output_file + '_' + str(args.fold_idx) + '.csv', results_table)
+    output_csv(args.output_folder + '/0731_NPU_test1_' + args.output_file + '_' + str(args.fold_idx) + '.csv', results_table)
 
 if __name__ == '__main__':
     main()
