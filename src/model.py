@@ -34,12 +34,15 @@ class Ring_GNN(nn.Module):
         self.radius = radius
         #rest of OG code
         
-        self.depth = [th.LongTensor([nodeclasses]), th.LongTensor([64]), th.LongTensor([64])]
+        # FIX: Use the 'hidden' parameter (32) instead of hardcoded 64
+        # This ensures internal layers match the NPU's 32-channel capacity
+        self.depth = [th.LongTensor([nodeclasses]), th.LongTensor([hidden]), th.LongTensor([hidden])]
+        # self.depth = [th.LongTensor([nodeclasses]), th.LongTensor([64]), th.LongTensor([64])]
         # self.equi_modulelist = nn.ModuleList([equi_2_to_2(m, n, radius = radius, k2_init = 0.5/avgnodenum) for m, n in zip(self.depth[:-1], self.depth[1:])])
         self.equi_modulelist = nn.ModuleList([
-    equi_2_to_2(m, n, radius=radius, k2_init=0.5/avgnodenum, active_strategy=self.active_strategy) # <-- ADD THIS
-    for m, n in zip(self.depth[:-1], self.depth[1:])
-])
+            equi_2_to_2(m, n, radius=radius, k2_init=0.5/avgnodenum, active_strategy=self.active_strategy) 
+            for m, n in zip(self.depth[:-1], self.depth[1:])
+        ])
         
         
         self.prediction = MLP([th.sum(th.stack(self.depth)).item(), hidden, n_classes])
@@ -128,31 +131,59 @@ def diag_offdiag_maxpool(input):
 
 import npu_state
 
-def ops_2_to_2(inputs, dim, normalization='inf', strategy=None):
-    # FORCE: Use the shared state regardless of what 'strategy' is
-    active = npu_state.active_strategy
+# def ops_2_to_2(inputs, dim, normalization='inf', strategy=None):
+#     # FORCE: Use the shared state regardless of what 'strategy' is
+#     active = npu_state.active_strategy
     
-    if active is None:
-        # If it's still None here, it means train.py main() 
-        # didn't set it before the training loop started.
-        raise RuntimeError(f"NPU Strategy is None at runtime. Dim: {dim}")
+#     if active is None:
+#         # If it's still None here, it means train.py main() 
+#         # didn't set it before the training loop started.
+#         raise RuntimeError(f"NPU Strategy is None at runtime. Dim: {dim}")
     
-    print(f"DEBUG: Current dim is {dim}")
-    print(f"DEBUG: Current active strategy is {active}")
+#     print(f"DEBUG: Current dim is {dim}")
+#     print(f"DEBUG: Current active strategy is {active}")
 
-    # FORCE NPU PATH: Always pad to 32
-    pad_size = 32 - dim
-    if pad_size > 0:
-        inputs = F.pad(inputs, (0, pad_size, 0, pad_size), "constant", 0)
+#     # FORCE NPU PATH: Always pad to 32
+#     pad_size = 32 - dim
+#     if pad_size > 0:
+#         inputs = F.pad(inputs, (0, pad_size, 0, pad_size), "constant", 0)
     
-    # Run on Hardware
-    results = active.run(inputs, 32, normalization)
+#     # Run on Hardware
+#     results = active.run(inputs, 32, normalization)
     
-    # Crop back
-    if pad_size > 0:
-        results = [op[:, :, :dim, :dim] for op in results]
+#     # Crop back
+#     if pad_size > 0:
+#         results = [op[:, :, :dim, :dim] for op in results]
             
-    return results
+#     return results
+def ops_2_to_2(inputs, dim, normalization='inf', strategy=None):
+    # Use the hotline state
+    active = npu_state.active_strategy if npu_state.active_strategy else strategy
+    
+    if active is not None and dim <= 32:
+        orig_c = inputs.shape[1] # This is likely 7 or 8 for MUTAG
+        
+        # 1. Pad Width/Height to 32
+        pad_hw = 32 - dim
+        if pad_hw > 0:
+            inputs = F.pad(inputs, (0, pad_hw, 0, pad_hw), "constant", 0)
+            
+        # 2. Pad Channels to 32 (The fix for your ValueError)
+        if orig_c < 32:
+            c_pad = 32 - orig_c
+            # Create zeros to fill the gap from 8 to 32
+            padding_tensor = th.zeros(inputs.shape[0], c_pad, 32, 32).to(inputs.device)
+            inputs = th.cat([inputs, padding_tensor], dim=1)
+
+        # 3. Run on NPU
+        results = active.run(inputs, 32, normalization)
+        
+        # 4. Crop back to original channels (8) and size (dim)
+        results = [op[:, :orig_c, :dim, :dim] for op in results]
+            
+        return results
+
+    return original_ops_2_to_2(inputs, dim, normalization)
     
 def original_ops_2_to_2(inputs, dim, normalization='inf', normalization_val=1.0): # N x D x m x m
     # input: N x D x m x m
