@@ -15,6 +15,18 @@ from torch.utils.data import DataLoader
 
 from sklearn.model_selection import StratifiedKFold
 
+# 1. LOAD NPU STATE FIRST
+import npu_state
+from npu_bridge import NPUStrategy
+
+# Hardcode the DFP path here for a moment to test
+try:
+    active_strategy = NPUStrategy('npu_speedup/gnn_ops_32.dfp')
+    npu_state.active_strategy = active_strategy    
+    print("NPU Strategy pre-loaded into shared state.")
+except Exception as e:
+    print(f"Pre-load failed: {e}")
+
 from model import Ring_GNN
 
 from gindt import GINDataset
@@ -149,9 +161,9 @@ def test(args, model, device, train_graphs, test_graphs, epoch):
 
 
     # return acc_train, acc_test
-
+    
 def main():
-
+    
     parser = argparse.ArgumentParser()
     parser.add_argument('--batch-size', type=int, help='Batch size', default=32)
     parser.add_argument('--gpu', type=int, help='GPU index', default=-1)
@@ -175,42 +187,70 @@ def main():
     parser.add_argument('--nodeclasses', type=int, default=1)
     parser.add_argument('--avgnodenum', type=int, default=10)
     parser.add_argument('--degree_as_nlabels', action="store_true")
+    
+    # 1. ADD THIS: So the script recognizes the --use_npu flag
+    parser.add_argument('--use_npu', action="store_true", help="Use MemryX NPU acceleration")
+    
     args = parser.parse_args()
+    
+    # 2. DEVICE SETUP
+    dev = th.device('cpu') 
 
-    dev = th.device('cpu')
-    # dev = th.device('cpu') if args.gpu < 0 else th.device('cuda:%d' % args.gpu)
+    # 3. NPU STRATEGY INITIALIZATION
+    active_strategy = None
+    if args.use_npu:
+        try:
+            from npu_bridge import NPUStrategy
+            # Load the DFP
+            active_strategy = NPUStrategy('npu_speedup/gnn_ops_32.dfp')
 
-    feats = [args.n_input] + [args.n_hidden] * (args.n_layers-1) + [args.n_classes]
-    model = Ring_GNN(args.nodeclasses, args.n_classes, avgnodenum = args.avgnodenum, hidden = 32, radius = args.radius).to(dev)
+            # PLUG IT INTO THE HOTLINE
+            npu_state.active_strategy = active_strategy
 
+            print("Successfully loaded NPU Strategy and locked into npu_state.")
+        except Exception as e:
+            print(f"NPU Initialization failed: {e}")
+
+    # 4. MODEL INITIALIZATION (Only define it ONCE)
+    # Pass both args and the active_strategy
+    model = Ring_GNN(
+        args.nodeclasses, 
+        args.n_classes, 
+        avgnodenum=args.avgnodenum, 
+        hidden=32, 
+        radius=args.radius,
+        active_strategy=active_strategy # <--- Important!
+    ).to(dev)
+    
+    print(f"VERIFY: Model strategy is {model.active_strategy}")
+
+    # 5. REST OF THE SETUP
     optimizer = getattr(optim, args.optim)(model.parameters(), lr=args.lr)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=20, gamma=0.5)
 
     th.manual_seed(0)
     np.random.seed(0) 
-    # if th.cuda.is_available():
-    #     th.cuda.manual_seed_all(0)
 
-    dataset = GINDataset(args.dataset, self_loop = False, device = dev, degree_as_nlabel=args.degree_as_nlabels)
-
+    dataset = GINDataset(args.dataset, self_loop=False, device=dev, degree_as_nlabel=args.degree_as_nlabels)
     train_graphs, test_graphs = separate_data(dataset, args.seed, args.fold_idx)
-    results_table = [] # Initialize at the start of main()
+    
+    results_table = []
 
+    # 6. TRAINING LOOP
     for i in range(args.n_epochs):
-        start_time = time.time() # Start clock
+        start_time = time.time()
         
+        # Note: scheduler.step() is usually called after optimizer.step() 
+        # but keeping your original order here
         scheduler.step()
         train(args, model, dev, train_graphs, optimizer, i)
         
-        # Capture the return values from test()
         acc_train, acc_test = test(args, model, dev, train_graphs, test_graphs, i)
         
-        duration = time.time() - start_time # End clock
-        
-        # Build the row here where 'i' and 'duration' are valid
+        duration = time.time() - start_time
         results_table.append([i, acc_test, duration])
         
-        print(f"Epoch {i} finished in {duration:.2f}s")
+        print(f"Epoch {i} finished in {duration:.2f}s | Test Acc: {acc_test:.4f}")
 
     output_csv(args.output_folder + '/0731_NPU_test1_' + args.output_file + '_' + str(args.fold_idx) + '.csv', results_table)
 

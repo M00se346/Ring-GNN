@@ -7,6 +7,7 @@ import dgl
 # from dgl.graph import DGLGraph
 from dgl import DGLGraph
 from dgl.utils import Index
+import npu_state 
 
 import pickle
 import os
@@ -24,10 +25,23 @@ class MLP(nn.Module):
         return self.linears[-1](x)
 
 class Ring_GNN(nn.Module):
-    def __init__(self, nodeclasses, n_classes, avgnodenum = 10, hidden = 32, radius = 2):
+    # def __init__(self, nodeclasses, n_classes, avgnodenum = 10, hidden = 32, radius = 2):
+    #     super(Ring_GNN, self).__init__()
+    def __init__(self, nodeclasses, n_classes, avgnodenum, hidden, radius, active_strategy=None): 
         super(Ring_GNN, self).__init__()
+        
+        self.active_strategy = active_strategy  # Save it so the layers can use it
+        self.radius = radius
+        #rest of OG code
+        
         self.depth = [th.LongTensor([nodeclasses]), th.LongTensor([64]), th.LongTensor([64])]
-        self.equi_modulelist = nn.ModuleList([equi_2_to_2(m, n, radius = radius, k2_init = 0.5/avgnodenum) for m, n in zip(self.depth[:-1], self.depth[1:])])
+        # self.equi_modulelist = nn.ModuleList([equi_2_to_2(m, n, radius = radius, k2_init = 0.5/avgnodenum) for m, n in zip(self.depth[:-1], self.depth[1:])])
+        self.equi_modulelist = nn.ModuleList([
+    equi_2_to_2(m, n, radius=radius, k2_init=0.5/avgnodenum, active_strategy=self.active_strategy) # <-- ADD THIS
+    for m, n in zip(self.depth[:-1], self.depth[1:])
+])
+        
+        
         self.prediction = MLP([th.sum(th.stack(self.depth)).item(), hidden, n_classes])
 
     def forward(self, x):
@@ -43,9 +57,10 @@ class Ring_GNN(nn.Module):
         return score
 
 class equi_2_to_2(nn.Module):
-    def __init__(self, input_depth, output_depth, normalization='inf', normalization_val=1.0, radius=2, k2_init = 0.1):
+    def __init__(self, input_depth, output_depth, normalization='inf', normalization_val=1.0, radius=2, k2_init = 0.1, active_strategy=None):
         super(equi_2_to_2, self).__init__()
         basis_dimension = 15
+        self.active_strategy = active_strategy
         self.radius = radius
         coeffs_values = lambda i, j, k: th.randn([i, j, k]) * th.sqrt(2. / (i + j).float())
         self.diag_bias_list = nn.ParameterList([])
@@ -71,8 +86,12 @@ class equi_2_to_2(nn.Module):
     def forward(self, inputs):
         m = inputs.size()[3]
 
-        ops_out = ops_2_to_2(inputs, m, normalization=self.normalization)
-        ops_out = th.stack(ops_out, dim = 2)
+        # ops_out = ops_2_to_2(inputs, m, normalization=self.normalization)
+        # ops_out = th.stack(ops_out, dim = 2)
+        
+        #pass into the NPU
+        ops_out = ops_2_to_2(inputs, m, normalization=self.normalization, strategy=self.active_strategy)
+        ops_out = th.stack(ops_out, dim=2)
 
         output_list = []
 
@@ -107,8 +126,35 @@ def diag_offdiag_maxpool(input):
 
     return th.cat([max_diag, max_offdiag], dim=1)
 
+import npu_state
 
-def ops_2_to_2(inputs, dim, normalization='inf', normalization_val=1.0): # N x D x m x m
+def ops_2_to_2(inputs, dim, normalization='inf', strategy=None):
+    # FORCE: Use the shared state regardless of what 'strategy' is
+    active = npu_state.active_strategy
+    
+    if active is None:
+        # If it's still None here, it means train.py main() 
+        # didn't set it before the training loop started.
+        raise RuntimeError(f"NPU Strategy is None at runtime. Dim: {dim}")
+    
+    print(f"DEBUG: Current dim is {dim}")
+    print(f"DEBUG: Current active strategy is {active}")
+
+    # FORCE NPU PATH: Always pad to 32
+    pad_size = 32 - dim
+    if pad_size > 0:
+        inputs = F.pad(inputs, (0, pad_size, 0, pad_size), "constant", 0)
+    
+    # Run on Hardware
+    results = active.run(inputs, 32, normalization)
+    
+    # Crop back
+    if pad_size > 0:
+        results = [op[:, :, :dim, :dim] for op in results]
+            
+    return results
+    
+def original_ops_2_to_2(inputs, dim, normalization='inf', normalization_val=1.0): # N x D x m x m
     # input: N x D x m x m
     diag_part = th.diagonal(inputs, dim1 = 2, dim2 = 3) # N x D x m
     sum_diag_part = th.sum(diag_part, dim=2, keepdim = True) # N x D x 1
@@ -167,7 +213,7 @@ def ops_2_to_2(inputs, dim, normalization='inf', normalization_val=1.0): # N x D
 
     if normalization is not None:
         float_dim = float(dim)
-        if normalization is 'inf':
+        if normalization == 'inf':
             op2 = th.div(op2, float_dim)
             op3 = th.div(op3, float_dim)
             op4 = th.div(op4, float_dim)
@@ -236,9 +282,15 @@ def test():
     print('ok')
 
 def main():
-    model = Ring_GNN()
+    
+    model = Ring_GNN(1, 2, 10, 32, 2) 
     input1, input2 = input_single()
     print(model(input1))
+    
+    
+    # model = Ring_GNN()
+    # input1, input2 = input_single()
+    # print(model(input1))
     print(model(input1) - model(input2))
 
 if __name__ == '__main__':
